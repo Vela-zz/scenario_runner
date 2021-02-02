@@ -31,6 +31,7 @@ from srunner.scenariomanager.scenarioatomics.atomic_behaviors import (TrafficLig
                                                                       ChangeActorWaypoints,
                                                                       ChangeActorWaypointsToReachPosition,
                                                                       ChangeActorLateralMotion,
+                                                                      ChangeActorTargetSpeedRate,
                                                                       Idle)
 # pylint: disable=unused-import
 # For the following includes the pylint check is disabled, as these are accessed via globals()
@@ -954,18 +955,26 @@ class OpenScenarioParser(object):
                     # duration and distance
                     distance = float('inf')
                     duration = float('inf')
+                    rate =float('inf')
+                    shape = str('')
                     dimension = long_maneuver.find("SpeedActionDynamics").attrib.get('dynamicsDimension')
                     if dimension == "distance":
                         distance = float(long_maneuver.find("SpeedActionDynamics").attrib.get('value', float("inf")))
+                    elif dimension =='rate':
+                        rate = float(long_maneuver.find('SpeedActionDynamics').attrib.get('value',float('inf'))) # get rate of speed Action 
+                        shape = long_maneuver.find('SpeedActionDynamics').attrib.get('dynamicsShape','')
                     else:
                         duration = float(long_maneuver.find("SpeedActionDynamics").attrib.get('value', float("inf")))
+
 
                     # absolute velocity with given target speed
                     if long_maneuver.find("SpeedActionTarget").find("AbsoluteTargetSpeed") is not None:
                         target_speed = float(long_maneuver.find("SpeedActionTarget").find(
                             "AbsoluteTargetSpeed").attrib.get('value', 0))
-                        atomic = ChangeActorTargetSpeed(
-                            actor, target_speed, distance=distance, duration=duration, name=maneuver_name)
+                        # atomic = ChangeActorTargetSpeed(
+                        #     actor, target_speed, distance=distance, duration=duration, name=maneuver_name)
+                        atomic = ChangeActorTargetSpeedRate(
+                            actor, target_speed, rate=rate,shape=shape,distance=distance, duration=duration, name=maneuver_name)
 
                     # relative velocity to given actor
                     if long_maneuver.find("SpeedActionTarget").find("RelativeTargetSpeed") is not None:
@@ -980,6 +989,7 @@ class OpenScenarioParser(object):
                                 obj_actor = traffic_actor
 
                         atomic = ChangeActorTargetSpeed(actor,
+                                                        
                                                         target_speed=0.0,
                                                         relative_actor=obj_actor,
                                                         value=value,
