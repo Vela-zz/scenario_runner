@@ -528,7 +528,7 @@ class ChangeActorTargetSpeed(AtomicBehavior):
 
         return new_status
 
-class ChangeActorTargetSpeedRate(ChangeActorTargetSpeed):
+class ChangeActorTargetSpeedRate(AtomicBehavior):
     """
     Atomic to change the target speed for an actor controller.
 
