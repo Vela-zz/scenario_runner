@@ -367,128 +367,6 @@ class UpdateAllActorControls(AtomicBehavior):
             actor_dict[actor_id].run_step()
 
         return py_trees.common.Status.RUNNING
-
-class ChangeActorTargetSpeedRate(ChangeActorTargetSpeed):
-    def __init__(self, actor, target_speed, init_speed=False,rate = None,shape='',
-                 duration=None, distance=None, relative_actor=None,
-                 value=None, value_type=None, continuous=False, name="ChangeActorTargetSpeed"):  
-        super().__init__( actor, target_speed, init_speed=False,
-                 duration=None, distance=None, relative_actor=None,
-                 value=None, value_type=None, continuous=False, name="ChangeActorTargetSpeed")
-        self._rate =rate 
-        self._shape = shape
-        self._event_start_spd = None
-        self._frame_cnt = None
-        self._accel_para = None
-    def initialise(self):
-        """
-        Set initial parameters such as _start_time and _start_location,
-        and get (actor, controller) pair from Blackboard.
-
-        May throw if actor is not available as key for the ActorsWithController
-        dictionary from Blackboard.
-        """
-        actor_dict = {}
-
-        try:
-            check_actors = operator.attrgetter("ActorsWithController")
-            actor_dict = check_actors(py_trees.blackboard.Blackboard())
-        except AttributeError:
-            pass
-
-        if not actor_dict or not self._actor.id in actor_dict:
-            raise RuntimeError("Actor not found in ActorsWithController BlackBoard")
-
-        self._start_time = GameTime.get_time()
-        self._start_location = CarlaDataProvider.get_location(self._actor)
-        self._event_start_spd = CarlaDataProvider.get_velocity(self._actor)
-        self._frame_cnt = 0
-        self._accel_para = 1 if self.__target_speed > self._event_start_spd else -1 
-
-        if self._relative_actor:
-            relative_velocity = CarlaDataProvider.get_velocity(self._relative_actor)
-
-            # get target velocity
-            if self._value_type == 'delta':
-                self._target_speed = relative_velocity + self._value
-            elif self._value_type == 'factor':
-                self._target_speed = relative_velocity * self._value
-            else:
-                print('self._value_type must be delta or factor')
-
-        actor_dict[self._actor.id].update_target_speed(self._target_speed, start_time=self._start_time)
-
-        if self._init_speed:
-            actor_dict[self._actor.id].set_init_speed()
-
-        super().initialise()
-
-    def update(self):
-        """
-        Check the actor's current state and update target speed, if it is relative to another actor.
-
-        returns:
-            py_trees.common.Status.SUCCESS, if the duration or distance driven exceeded limits
-                                            if another ChangeActorTargetSpeed atomic for the same actor was triggered.
-            py_trees.common.Status.FAILURE, if the actor is not found in ActorsWithController Blackboard dictionary.
-            py_trees.common.Status.FAILURE, else.
-        """
-        try:
-            check_actors = operator.attrgetter("ActorsWithController")
-            actor_dict = check_actors(py_trees.blackboard.Blackboard())
-        except AttributeError:
-            pass
-
-        if not actor_dict or not self._actor.id in actor_dict:
-            return py_trees.common.Status.FAILURE
-
-        if actor_dict[self._actor.id].get_last_longitudinal_command() != self._start_time:
-            return py_trees.common.Status.SUCCESS
-
-        new_status = py_trees.common.Status.RUNNING
-        #calculate
-        self._frame_cnt+=1
-        mean_frame_gen_t = (GameTime.get_time() - self._start_time) /self._frame_cnt
-
-        cur_actor_spd = CarlaDataProvider.get_velocity(self._actor)
-
-
-
-        if self._relative_actor: #RelaticeTargetSpeedAction
-            relative_velocity = CarlaDataProvider.get_velocity(self._relative_actor)
-
-            # get target velocity
-            if self._value_type == 'delta':
-                actor_dict[self._actor.id].update_target_speed(relative_velocity + self._value)
-            elif self._value_type == 'factor':
-                actor_dict[self._actor.id].update_target_speed(relative_velocity * self._value)
-            else:
-                print('self._value_type must be delta or factor')
-        else:#AbsoluteTargetSpeedAction
-            if self._shape =='linear':
-                #calculate nxt frame spd 
-                nxt_frame_actor_spd = cur_actor_spd + mean_frame_gen_t*rate*self._accel_para
-                if abs(nxt_frame_actor_spd - self._target_speed) < 0.05:
-                    nxt_frame_actor_spd = self._target_speed
-                    actor_dict[self._actor.id].update_target_speed(nxt_frame_actor_spd)
-                    return py_trees.common.Status.RUNNING
-                else:
-                    actor_dict[self._actor.id].update_target_speed(nxt_frame_actor_spd)
-
-        # check duration and driven_distance
-        if not self._continuous:
-            if (self._duration is not None) and (GameTime.get_time() - self._start_time > self._duration):
-                new_status = py_trees.common.Status.SUCCESS
-
-            driven_distance = CarlaDataProvider.get_location(self._actor).distance(self._start_location)
-            if (self._distance is not None) and (driven_distance > self._distance):
-                new_status = py_trees.common.Status.SUCCESS
-
-        if self._distance is None and self._duration is None:
-            new_status = py_trees.common.Status.SUCCESS
-
-        return new_status
-    
 class ChangeActorTargetSpeed(AtomicBehavior):
 
     """
@@ -647,6 +525,173 @@ class ChangeActorTargetSpeed(AtomicBehavior):
 
         if self._distance is None and self._duration is None:
             new_status = py_trees.common.Status.SUCCESS
+
+        return new_status
+
+class ChangeActorTargetSpeedRate(ChangeActorTargetSpeed):
+    """
+    Atomic to change the target speed for an actor controller.
+
+    The behavior is in RUNNING state until the distance/duration
+    conditions are satisfied, or if a second ChangeActorTargetSpeed atomic
+    for the same actor is triggered.
+
+    Args:
+        actor (carla.Actor): Controlled actor.
+        target_speed (float): New target speed [m/s].
+        init_speed (boolean): Flag to indicate if the speed is the initial actor speed.
+            Defaults to False.
+        duration (float): Duration of the maneuver [s].
+            Defaults to None.
+        distance (float): Distance of the maneuver [m].
+            Defaults to None.
+        relative_actor (carla.Actor): If the target speed setting should be relative to another actor.
+            Defaults to None.
+        value (float): Offset, if the target speed setting should be relative to another actor.
+            Defaults to None.
+        value_type (string): Either 'Delta' or 'Factor' influencing how the offset to the reference actors
+            velocity is applied. Defaults to None.
+        continuous (boolean): If True, the atomic remains in RUNNING, independent of duration or distance.
+            Defaults to False.
+        name (string): Name of the behavior.
+            Defaults to 'ChangeActorTargetSpeed'.
+
+    Attributes:
+        _target_speed (float): New target speed [m/s].
+        _init_speed (boolean): Flag to indicate if the speed is the initial actor speed.
+            Defaults to False.
+        _start_time (float): Start time of the atomic [s].
+            Defaults to None.
+        _start_location (carla.Location): Start location of the atomic.
+            Defaults to None.
+        _duration (float): Duration of the maneuver [s].
+            Defaults to None.
+        _distance (float): Distance of the maneuver [m].
+            Defaults to None.
+        _relative_actor (carla.Actor): If the target speed setting should be relative to another actor.
+            Defaults to None.
+        _value (float): Offset, if the target speed setting should be relative to another actor.
+            Defaults to None.
+        _value_type (string): Either 'Delta' or 'Factor' influencing how the offset to the reference actors
+            velocity is applied. Defaults to None.
+        _continuous (boolean): If True, the atomic remains in RUNNING, independent of duration or distance.
+            Defaults to False.
+    """
+
+    def __init__(self, actor, target_speed, init_speed=False,
+                 rate=None,shape='', relative_actor=None,
+                 value=None, value_type=None, continuous=False, name="ChangeActorTargetSpeed"):
+        """
+        Setup parameters
+        """
+        super(ChangeActorTargetSpeed, self).__init__(name, actor)
+
+        self._target_speed = target_speed
+        self._init_speed = init_speed
+
+        self._start_time = None
+        self._start_location = None
+
+        self._relative_actor = relative_actor
+        self._value = value
+        self._value_type = value_type
+        self._continuous = continuous
+        self._rate = rate
+
+    def initialise(self):
+        """
+        Set initial parameters such as _start_time and _start_location,
+        and get (actor, controller) pair from Blackboard.
+
+        May throw if actor is not available as key for the ActorsWithController
+        dictionary from Blackboard.
+        """
+        actor_dict = {}
+
+        try:
+            check_actors = operator.attrgetter("ActorsWithController")
+            actor_dict = check_actors(py_trees.blackboard.Blackboard())
+        except AttributeError:
+            pass
+
+        if not actor_dict or not self._actor.id in actor_dict:
+            raise RuntimeError("Actor not found in ActorsWithController BlackBoard")
+
+        self._start_time = GameTime.get_time()
+        self._start_location = CarlaDataProvider.get_location(self._actor)
+        self._event_start_spd = CarlaDataProvider.get_velocity(self._actor)
+        self._frame_cnt = 0
+        self._accel_para = 1 if self._target_speed > self._event_start_spd else -1 
+
+        if self._relative_actor:
+            relative_velocity = CarlaDataProvider.get_velocity(self._relative_actor)
+
+            # get target velocity
+            if self._value_type == 'delta':
+                self._target_speed = relative_velocity + self._value
+            elif self._value_type == 'factor':
+                self._target_speed = relative_velocity * self._value
+            else:
+                print('self._value_type must be delta or factor')
+
+        actor_dict[self._actor.id].update_target_speed(self._target_speed, start_time=self._start_time)
+
+        if self._init_speed:
+            actor_dict[self._actor.id].set_init_speed()
+
+        super(ChangeActorTargetSpeed, self).initialise()
+
+    def update(self):
+        """
+        Check the actor's current state and update target speed, if it is relative to another actor.
+
+        returns:
+            py_trees.common.Status.SUCCESS, if the duration or distance driven exceeded limits
+                                            if another ChangeActorTargetSpeed atomic for the same actor was triggered.
+            py_trees.common.Status.FAILURE, if the actor is not found in ActorsWithController Blackboard dictionary.
+            py_trees.common.Status.FAILURE, else.
+        """
+        try:
+            check_actors = operator.attrgetter("ActorsWithController")
+            actor_dict = check_actors(py_trees.blackboard.Blackboard())
+        except AttributeError:
+            pass
+
+        if not actor_dict or not self._actor.id in actor_dict:
+            return py_trees.common.Status.FAILURE
+
+        if actor_dict[self._actor.id].get_last_longitudinal_command() != self._start_time:
+            return py_trees.common.Status.SUCCESS
+
+        new_status = py_trees.common.Status.RUNNING
+        self._frame_cnt+=1
+        #mean_frame_gen_t = (GameTime.get_time() - self._start_time) /self._frame_cnt
+
+        cur_actor_spd = CarlaDataProvider.get_velocity(self._actor)
+        cur_time = GameTime.get_time()
+
+        #AbsoluteTargetSpeedAction
+        #calculate nxt frame spd 
+        nxt_frame_actor_spd = self._event_start_spd + (cur_time-self._start_time) * self._rate * self._accel_para
+        #print(cur_time,cur_actor_spd, nxt_frame_actor_spd)
+        if nxt_frame_actor_spd - self._target_speed < 0:
+            print('Arrive Target_speed')
+            nxt_frame_actor_spd = self._target_speed
+            actor_dict[self._actor.id].update_target_speed(nxt_frame_actor_spd)
+            new_status =  py_trees.common.Status.SUCCESS
+        else:
+            actor_dict[self._actor.id].update_target_speed(nxt_frame_actor_spd)
+
+        if self._relative_actor:
+            relative_velocity = CarlaDataProvider.get_velocity(self._relative_actor)
+
+            # get target velocity
+            if self._value_type == 'delta':
+                actor_dict[self._actor.id].update_target_speed(relative_velocity + self._value)
+            elif self._value_type == 'factor':
+                actor_dict[self._actor.id].update_target_speed(relative_velocity * self._value)
+            else:
+                print('self._value_type must be delta or factor')
 
         return new_status
 
