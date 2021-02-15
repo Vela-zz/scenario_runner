@@ -528,7 +528,7 @@ class ChangeActorTargetSpeed(AtomicBehavior):
 
         return new_status
 
-class ChangeActorTargetSpeedRate(AtomicBehavior):
+class ChangeActorTargetSpeedRate(AtomicBehavior): 
     """
     Atomic to change the target speed for an actor controller.
 
@@ -584,7 +584,7 @@ class ChangeActorTargetSpeedRate(AtomicBehavior):
         """
         Setup parameters
         """
-        super(ChangeActorTargetSpeed, self).__init__(name, actor)
+        super(ChangeActorTargetSpeedRate, self).__init__(name, actor)
 
         self._target_speed = target_speed
         self._init_speed = init_speed
@@ -639,7 +639,7 @@ class ChangeActorTargetSpeedRate(AtomicBehavior):
         if self._init_speed:
             actor_dict[self._actor.id].set_init_speed()
 
-        super(ChangeActorTargetSpeed, self).initialise()
+        super(ChangeActorTargetSpeedRate, self).initialise()
 
     def update(self):
         """
@@ -673,8 +673,14 @@ class ChangeActorTargetSpeedRate(AtomicBehavior):
         #AbsoluteTargetSpeedAction
         #calculate nxt frame spd 
         nxt_frame_actor_spd = self._event_start_spd + (cur_time-self._start_time) * self._rate * self._accel_para
-        #print(cur_time,cur_actor_spd, nxt_frame_actor_spd)
-        if nxt_frame_actor_spd - self._target_speed < 0:
+        if self._accel_para == 1:
+            if nxt_frame_actor_spd > self._target_speed:
+                nxt_frame_actor_spd = self._target_speed
+        else:
+            if nxt_frame_actor_spd <= self._target_speed:
+                nxt_frame_actor_spd = self._target_speed
+        print(cur_time-self._start_time,cur_actor_spd, nxt_frame_actor_spd)
+        if (cur_actor_spd - self._target_speed) *self._accel_para >=0:
             print('Arrive Target_speed')
             nxt_frame_actor_spd = self._target_speed
             actor_dict[self._actor.id].update_target_speed(nxt_frame_actor_spd)
